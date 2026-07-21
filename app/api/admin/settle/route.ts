@@ -1,4 +1,5 @@
 import { getRuntimeEnv } from "../../../lib/runtime-env";
+import { authorisedAdminRequest } from "../../../lib/admin-auth";
 
 type Score = { fixtureId: string; homeGoals?: number; awayGoals?: number; isVoid?: boolean };
 type SettlementPayload = { snapshotId?: string; actor?: string; scores?: Score[] };
@@ -11,13 +12,6 @@ type StoredSelection = {
   credits: number;
 };
 
-function authorised(request: Request) {
-  const expected = getRuntimeEnv().TACTELO_ADMIN_KEY;
-  if (!expected) return true;
-  const supplied = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  return supplied === expected;
-}
-
 function selectionWon(selection: StoredSelection, score: Score) {
   const home = score.homeGoals ?? 0;
   const away = score.awayGoals ?? 0;
@@ -28,7 +22,7 @@ function selectionWon(selection: StoredSelection, score: Score) {
 }
 
 export async function POST(request: Request) {
-  if (!authorised(request)) return Response.json({ error: "Unauthorised" }, { status: 401 });
+  if (!(await authorisedAdminRequest(request))) return Response.json({ error: "Unauthorised" }, { status: 401 });
   const env = getRuntimeEnv();
   if (!env.DB) return Response.json({ error: "D1 storage is not configured" }, { status: 503 });
   let payload: SettlementPayload;

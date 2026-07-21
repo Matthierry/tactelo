@@ -1,0 +1,37 @@
+import { buildFeed, COLOUR_CSV_URL, FIXTURE_CSV_URL } from "../../../lib/csv";
+import { getRuntimeEnv } from "../../../lib/runtime-env";
+
+export const dynamic = "force-dynamic";
+
+function authorised(request: Request) {
+  const env = getRuntimeEnv();
+  const expected = env.TACTELO_ADMIN_KEY;
+  if (!expected) return true;
+  const supplied = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? new URL(request.url).searchParams.get("key");
+  return supplied === expected;
+}
+
+export async function POST(request: Request) {
+  if (!authorised(request)) return Response.json({ error: "Unauthorised" }, { status: 401 });
+  const env = getRuntimeEnv();
+  if (!env.DB) return Response.json({ error: "D1 storage is not configured" }, { status: 503 });
+  const db = env.DB;
+  try {
+    const [fixtureResponse, colourResponse] = await Promise.all([fetch(FIXTURE_CSV_URL), fetch(COLOUR_CSV_URL)]);
+    if (!fixtureResponse.ok || !colourResponse.ok) throw new Error("Google Sheet feed unavailable");
+    const fixtureCsv = await fixtureResponse.text();
+    const feed = buildFeed(fixtureCsv, await colourResponse.text());
+    const confirm = new URL(request.url).searchParams.get("confirm") === "true";
+    const status = confirm ? "active" : "staged";
+    const statements = [
+      db.prepare("INSERT OR REPLACE INTO fixture_snapshots (id, label, source_url, imported_at, import_hash, status, raw_csv) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(feed.snapshotId, feed.gameweekLabel, FIXTURE_CSV_URL, feed.importedAt, feed.snapshotId, status, fixtureCsv),
+      ...feed.fixtures.map((fixture) => db.prepare("INSERT OR REPLACE INTO fixtures (id, snapshot_id, competition, kickoff_iso, home_team, away_team, status, raw_row) VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?)").bind(fixture.id, feed.snapshotId, fixture.competition, fixture.kickoffIso, fixture.homeTeam, fixture.awayTeam, JSON.stringify(fixture))),
+      db.prepare("INSERT INTO audit_log (actor, action, entity, after, timestamp) VALUES ('scheduled-import', 'snapshot_imported', ?, ?, ?)").bind(feed.snapshotId, JSON.stringify({ fixtures: feed.fixtures.length, status }), feed.importedAt),
+    ];
+    if (confirm) statements.unshift(db.prepare("UPDATE fixture_snapshots SET status = 'hidden' WHERE status = 'active'"));
+    await db.batch(statements);
+    return Response.json({ ok: true, snapshotId: feed.snapshotId, fixtures: feed.fixtures.length, status, missingColourTeams: feed.missingColourTeams });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Import failed" }, { status: 502 });
+  }
+}

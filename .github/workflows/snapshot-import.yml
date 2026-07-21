@@ -1,0 +1,44 @@
+name: Refresh fixture snapshot
+
+on:
+  schedule:
+    # Runs hourly; the timezone check below limits imports to 13:00 and 19:00 UK time.
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      confirm_snapshot:
+        description: "Confirm the imported snapshot as active"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check UK import window
+        id: window
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          hour=$(TZ=Europe/London date +%H)
+          if [[ "$EVENT_NAME" == "workflow_dispatch" || "$hour" == "13" || "$hour" == "19" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Import published Google Sheet
+        if: steps.window.outputs.run == 'true'
+        env:
+          APP_URL: ${{ secrets.TACTELO_APP_URL }}
+          ADMIN_KEY: ${{ secrets.TACTELO_ADMIN_KEY }}
+          CONFIRM: ${{ inputs.confirm_snapshot || false }}
+        run: |
+          test -n "$APP_URL"
+          confirm="false"
+          if [[ "$CONFIRM" == "true" ]]; then confirm="true"; fi
+          curl --fail-with-body --retry 2 \
+            -X POST \
+            -H "Authorization: Bearer $ADMIN_KEY" \
+            "$APP_URL/api/admin/import?confirm=$confirm"

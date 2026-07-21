@@ -76,7 +76,7 @@ function Brand() {
   );
 }
 
-function TopNav({ view, onView, user }: { view: View; onView: (view: View) => void; user: string | null }) {
+function TopNav({ view, onView, user, admin }: { view: View; onView: (view: View) => void; user: string | null; admin: boolean }) {
   const items: Array<[View, string, string]> = [
     ["selections", "Make picks", "◎"],
     ["picks", "My picks", "▣"],
@@ -94,7 +94,7 @@ function TopNav({ view, onView, user }: { view: View; onView: (view: View) => vo
           ))}
         </nav>
         <div className="account-area">
-          <button className="admin-link" onClick={() => onView("admin")}>Admin</button>
+          {admin && <button className="admin-link" onClick={() => onView("admin")}>Admin</button>}
           <span className={user ? "avatar signed-in" : "avatar"}>{user ? user.slice(0, 1).toUpperCase() : "?"}</span>
         </div>
       </div>
@@ -435,13 +435,54 @@ function LeaderboardView() {
   );
 }
 
-function AdminView({ feed, toast }: { feed: FixtureFeed; toast: (message: string) => void }) {
+function AdminLogin({ onSuccess, onCancel }: { onSuccess: () => void; onCancel: () => void }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/admin/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const payload = await response.json() as { authenticated?: boolean; error?: string };
+      if (!response.ok || !payload.authenticated) throw new Error(payload.error ?? "Admin sign-in failed");
+      setPassword("");
+      onSuccess();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Admin sign-in failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="admin-login-page">
+      <form className="admin-login-card" onSubmit={submit}>
+        <span className="admin-lock" aria-hidden="true">⌑</span>
+        <span className="eyebrow">Restricted access</span>
+        <h1>Admin sign in.</h1>
+        <p>Enter the private Tactelo admin password to access imports, results and settlement controls.</p>
+        <label htmlFor="admin-password">Admin password</label>
+        <input id="admin-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} autoFocus required />
+        {error && <div className="admin-login-error" role="alert">{error}</div>}
+        <button className="primary-button full" type="submit" disabled={busy || !password}>{busy ? "Signing in…" : "Sign in securely"}<span>→</span></button>
+        <button className="admin-cancel" type="button" onClick={onCancel}>Return to Tactelo</button>
+      </form>
+    </section>
+  );
+}
+
+function AdminView({ feed, toast, onLogout }: { feed: FixtureFeed; toast: (message: string) => void; onLogout: () => void }) {
   const [scores, setScores] = useState<Record<string, [string, string]>>({});
   const [busy, setBusy] = useState(false);
   const importNow = () => { setBusy(true); window.setTimeout(() => { setBusy(false); toast("Fixture and team-colour feeds checked successfully."); }, 900); };
   return (
     <section className="admin-page">
-      <div className="admin-title"><div><span className="eyebrow">Operations</span><h1>Game control.</h1><p>Import health, active snapshot and settlement controls for the POC.</p></div><button className="primary-button" onClick={importNow} disabled={busy}>{busy ? "Checking feeds…" : "Run import now"}<span>↻</span></button></div>
+      <div className="admin-title"><div><span className="eyebrow">Operations</span><h1>Game control.</h1><p>Import health, active snapshot and settlement controls for the POC.</p></div><div className="admin-title-actions"><button className="secondary-button" onClick={onLogout}>Sign out</button><button className="primary-button" onClick={importNow} disabled={busy}>{busy ? "Checking feeds…" : "Run import now"}<span>↻</span></button></div></div>
       <div className="health-grid">
         <article><span className="health-icon good">✓</span><div><small>Fixture feed</small><h2>Healthy</h2><p>{feed.fixtures.length} valid rows · {feed.source === "google-sheet" ? "Google Sheet live" : "Demo fallback active"}</p></div></article>
         <article><span className="health-icon good">✓</span><div><small>Team colours</small><h2>{feed.missingColourTeams.length ? "Needs review" : "All matched"}</h2><p>{feed.missingColourTeams.length} unmatched team names</p></div></article>
@@ -473,6 +514,8 @@ export default function TacteloApp() {
   const [toast, setToast] = useState<Toast>(null);
   const [loaded, setLoaded] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
+  const [adminAuthenticated, setAdminAuthenticated] = useState(false);
+  const [adminChecked, setAdminChecked] = useState(false);
 
   useEffect(() => {
     window.setTimeout(() => {
@@ -495,6 +538,12 @@ export default function TacteloApp() {
       .then((nextFeed) => setFeed(nextFeed))
       .catch(() => setFeed(demoFixtureFeed))
       .finally(() => setLoaded(true));
+    fetch("/api/admin/auth", { cache: "no-store" })
+      .then((response) => response.json() as Promise<{ authenticated?: boolean }>)
+      .then((payload) => setAdminAuthenticated(Boolean(payload.authenticated)))
+      .catch(() => setAdminAuthenticated(false))
+      .finally(() => setAdminChecked(true));
+    if (window.location.pathname === "/admin" || window.location.hash === "#admin") window.setTimeout(() => setView("admin"), 0);
     track("page_loaded_make_selections");
   }, []);
 
@@ -514,6 +563,14 @@ export default function TacteloApp() {
     else setView(next);
     window.scrollTo({ top: 0, behavior: "smooth" });
     if (next === "leaderboard") track("leaderboard_viewed");
+  };
+
+  const logoutAdmin = async () => {
+    await fetch("/api/admin/auth", { method: "DELETE" });
+    setAdminAuthenticated(false);
+    window.history.replaceState(null, "", "/");
+    setView("selections");
+    setToast({ tone: "success", message: "Admin session ended securely." });
   };
 
   const requestSubmit = (credits: number[], combo: number) => {
@@ -569,10 +626,10 @@ export default function TacteloApp() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  if (!storageReady || !loaded) {
+  if (!storageReady || !loaded || !adminChecked) {
     return (
       <div className="app-shell">
-        <TopNav view="selections" onView={() => undefined} user={null} />
+        <TopNav view="selections" onView={() => undefined} user={null} admin={false} />
         <main className="main-content loading-shell" aria-label="Loading fixtures">
           <div className="loading-kicker" /><div className="loading-title" /><div className="loading-copy" />
           <div className="loading-grid"><div /><div /></div>
@@ -583,15 +640,16 @@ export default function TacteloApp() {
 
   return (
     <div className="app-shell">
-      <TopNav view={view} onView={navigate} user={user} />
+      <TopNav view={view} onView={navigate} user={user} admin={adminAuthenticated} />
       <main className="main-content">
         {view === "selections" && <MakeSelections feed={feed} picks={picks} onPicks={setPicks} onContinue={() => { setView("credits"); track("credit_allocation_page_viewed"); window.scrollTo({ top: 0 }); }} closed={closed} />}
         {view === "credits" && <CreditsView picks={picks} onBack={() => setView("selections")} onSubmit={requestSubmit} />}
         {view === "picks" && <PicksView receipt={receipt} onMakePicks={() => setView("selections")} />}
         {view === "leaderboard" && <LeaderboardView />}
-        {view === "admin" && <AdminView feed={feed} toast={(message) => setToast({ tone: "success", message })} />}
+        {view === "admin" && !adminAuthenticated && <AdminLogin onSuccess={() => setAdminAuthenticated(true)} onCancel={() => { window.history.replaceState(null, "", "/"); navigate("selections"); }} />}
+        {view === "admin" && adminAuthenticated && <AdminView feed={feed} toast={(message) => setToast({ tone: "success", message })} onLogout={logoutAdmin} />}
       </main>
-      <footer className="site-footer"><div><Brand /><p>Three picks. Six credits. One tactical edge.</p></div><div><button onClick={() => navigate("selections")}>Game rules</button><button onClick={() => navigate("leaderboard")}>Leaderboard</button><button onClick={() => navigate("admin")}>Admin</button></div><small>Free to play · Tactelo POC 2026</small></footer>
+      <footer className="site-footer"><div><Brand /><p>Three picks. Six credits. One tactical edge.</p></div><div><button onClick={() => navigate("selections")}>Game rules</button><button onClick={() => navigate("leaderboard")}>Leaderboard</button>{adminAuthenticated && <button onClick={() => navigate("admin")}>Admin</button>}</div><small>Free to play · Tactelo POC 2026</small></footer>
       <BottomNav view={view} onView={navigate} />
       {showLogin && <LoginModal onClose={() => setShowLogin(false)} onComplete={authenticateAndSubmit} />}
       {toast && <div className={`toast ${toast.tone}`} role="status"><span>{toast.tone === "success" ? "✓" : "!"}</span>{toast.message}<button onClick={() => setToast(null)}>×</button></div>}

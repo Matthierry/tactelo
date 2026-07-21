@@ -1,18 +1,11 @@
 import { buildFeed, COLOUR_CSV_URL, FIXTURE_CSV_URL } from "../../../lib/csv";
 import { getRuntimeEnv } from "../../../lib/runtime-env";
+import { authorisedAdminRequest } from "../../../lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
-function authorised(request: Request) {
-  const env = getRuntimeEnv();
-  const expected = env.TACTELO_ADMIN_KEY;
-  if (!expected) return true;
-  const supplied = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? new URL(request.url).searchParams.get("key");
-  return supplied === expected;
-}
-
 export async function POST(request: Request) {
-  if (!authorised(request)) return Response.json({ error: "Unauthorised" }, { status: 401 });
+  if (!(await authorisedAdminRequest(request))) return Response.json({ error: "Unauthorised" }, { status: 401 });
   const env = getRuntimeEnv();
   if (!env.DB) return Response.json({ error: "D1 storage is not configured" }, { status: 503 });
   const db = env.DB;

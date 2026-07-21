@@ -43,6 +43,20 @@ npm run build
 npm run lint
 ```
 
+Apply the checked-in migrations to the production D1 database before the first
+deployment:
+
+```bash
+npm run db:migrate:remote
+```
+
+## Cloudflare deployment
+
+The repository is configured for the `tactelo` Worker and the `tactelo-db` D1
+database. In Cloudflare Workers Builds, use `npm run build` as the build command
+and `npx wrangler deploy` as the deploy command. Add `TACTELO_ADMIN_KEY` as an
+encrypted Worker secret; never commit its value.
+
 ## Scheduled import setup
 
 Add these free GitHub repository secrets:

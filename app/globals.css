@@ -249,6 +249,9 @@ button:disabled { cursor: not-allowed; }
 .receipt-pick > div { display: flex; justify-content: space-between; gap: 10px; padding-top: 13px; border-top: 1px solid var(--border-default); font-size: 10px; color: var(--text-secondary); }
 .receipt-pick > div strong { color: var(--brand-highlight); }
 .receipt-pick em { display: inline-block; margin-top: 14px; padding: 5px 8px; border-radius: 99px; color: var(--warning); background: rgba(244, 201, 93, .08); font-size: 9px; font-style: normal; }
+.receipt-pick.result-won em { color: var(--positive); background: rgba(34, 201, 122, .1); }
+.receipt-pick.result-lost em { color: var(--negative); background: rgba(240, 82, 82, .1); }
+.receipt-pick.result-void em { color: var(--text-secondary); background: rgba(153, 167, 184, .1); }
 .receipt-combo { grid-column: 1 / -1; }
 .receipt-combo .market-line.combo { background: var(--brand-primary); }
 .receipt-foot { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-top: 17px; padding: 14px 17px; border-radius: 10px; background: var(--bg-surface-secondary); color: var(--text-muted); font-size: 10px; }

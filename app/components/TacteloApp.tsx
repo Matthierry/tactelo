@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { demoFixtureFeed, leaderboardRows } from "../lib/demo-data";
+import { demoFixtureFeed } from "../lib/demo-data";
 import type {
   Fixture,
   FixtureFeed,
@@ -402,16 +402,59 @@ function LoginModal({ onClose, onComplete }: { onClose: () => void; onComplete: 
   );
 }
 
+type EntryResult = "pending" | "won" | "lost" | "void";
+type LiveEntry = {
+  status: string;
+  selections: Array<{ fixtureId: string; result: EntryResult; points: number }>;
+  combo: { result: EntryResult; points: number; settledPrice: number | null } | null;
+};
+type LeaderboardRow = { name: string; points: number; winners: number; average: number };
+
+function resultLabel(result: EntryResult) {
+  if (result === "won") return "Won";
+  if (result === "lost") return "Lost";
+  if (result === "void") return "Void";
+  return "Awaiting result";
+}
+
 function PicksView({ receipt, onMakePicks }: { receipt: SubmissionReceipt | null; onMakePicks: () => void }) {
+  const [liveEntry, setLiveEntry] = useState<LiveEntry | null>(null);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    if (!receipt) return;
+    let cancelled = false;
+    fetch(`/api/my-entry?receiptId=${encodeURIComponent(receipt.id)}&refresh=${Date.now()}`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as LiveEntry & { error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "Your results could not be loaded.");
+        return payload;
+      })
+      .then((payload) => { if (!cancelled) { setLiveEntry(payload); setLoadError(""); } })
+      .catch((reason) => { if (!cancelled) setLoadError(reason instanceof Error ? reason.message : "Your results could not be loaded."); });
+    return () => { cancelled = true; };
+  }, [receipt]);
+
   if (!receipt) {
     return <section className="empty-entry"><div className="empty-entry-icon">▣</div><span className="eyebrow">My picks</span><h1>No entry submitted yet.</h1><p>Choose three predictions, allocate your six credits and submit before the first fixture kicks off.</p><button className="primary-button" onClick={onMakePicks}>Make my picks <span>→</span></button></section>;
   }
   return (
     <section className="receipt-page">
-      <div className="receipt-hero"><div className="success-ring">✓</div><span className="eyebrow">Entry confirmed</span><h1>You’re in for the gameweek.</h1><p>Submitted {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/London" }).format(new Date(receipt.submittedAt))}</p><div className="receipt-id">Receipt {receipt.id}</div></div>
+      <div className="receipt-hero"><div className="success-ring">✓</div><span className="eyebrow">{liveEntry?.status === "settled" ? "Gameweek settled" : "Entry confirmed"}</span><h1>{liveEntry?.status === "settled" ? "Your results are in." : "You’re in for the gameweek."}</h1><p>Submitted {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/London" }).format(new Date(receipt.submittedAt))}</p><div className="receipt-id">Receipt {receipt.id}</div></div>
+      {loadError && <div className="alert warning"><span>!</span><div><strong>Live results unavailable</strong><p>{loadError}</p></div></div>}
       <div className="receipt-grid">
-        {receipt.picks.map((pick, index) => <article className="receipt-pick" key={pick.fixtureId}><span className={`market-line ${outcomeMeta[pick.outcome].className}`} /><small>{pick.fixtureLabel}</small><h2>{pick.label}</h2><div><span>{receipt.credits[index]} credit{receipt.credits[index] === 1 ? "" : "s"} × {pick.price.toFixed(2)}</span><strong>{(receipt.credits[index] * pick.price).toFixed(2)} pts</strong></div><em>Awaiting result</em></article>)}
-        {receipt.comboCredit > 0 && <article className="receipt-pick receipt-combo"><span className="market-line combo" /><small>Three-pick combo</small><h2>All three to win</h2><div><span>1 credit × {receipt.comboPrice.toFixed(2)}</span><strong>{receipt.comboPrice.toFixed(2)} pts</strong></div><em>Awaiting result</em></article>}
+        {receipt.picks.map((pick, index) => {
+          const settled = liveEntry?.selections.find((item) => item.fixtureId === pick.fixtureId);
+          const result = settled?.result ?? "pending";
+          const displayPoints = result === "pending" ? receipt.credits[index] * pick.price : settled?.points ?? 0;
+          return <article className={`receipt-pick result-${result}`} key={pick.fixtureId}><span className={`market-line ${outcomeMeta[pick.outcome].className}`} /><small>{pick.fixtureLabel}</small><h2>{pick.label}</h2><div><span>{receipt.credits[index]} credit{receipt.credits[index] === 1 ? "" : "s"} × {pick.price.toFixed(2)}</span><strong>{displayPoints.toFixed(2)} pts</strong></div><em>{resultLabel(result)}</em></article>;
+        })}
+        {receipt.comboCredit > 0 && (() => {
+          const result = liveEntry?.combo?.result ?? "pending";
+          const price = liveEntry?.combo?.settledPrice ?? receipt.comboPrice;
+          const points = result === "pending" ? receipt.comboPrice : liveEntry?.combo?.points ?? 0;
+          return <article className={`receipt-pick receipt-combo result-${result}`}><span className="market-line combo" /><small>Three-pick combo</small><h2>All three to win</h2><div><span>1 credit × {price.toFixed(2)}</span><strong>{points.toFixed(2)} pts</strong></div><em>{resultLabel(result)}</em></article>;
+        })()}
       </div>
       <div className="receipt-foot"><span>Selections and prices are locked to snapshot <strong>{receipt.snapshotId}</strong>.</span><button className="secondary-button">Game rules</button></div>
     </section>
@@ -420,16 +463,44 @@ function PicksView({ receipt, onMakePicks }: { receipt: SubmissionReceipt | null
 
 function LeaderboardView() {
   const [scope, setScope] = useState<"overall" | "gameweek">("overall");
+  const [rows, setRows] = useState<LeaderboardRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/leaderboard?scope=${scope}&refresh=${Date.now()}`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as { rows?: LeaderboardRow[]; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "Leaderboard could not be loaded.");
+        return payload.rows ?? [];
+      })
+      .then((nextRows) => { if (!cancelled) { setRows(nextRows); setLoadError(""); } })
+      .catch((reason) => { if (!cancelled) { setRows([]); setLoadError(reason instanceof Error ? reason.message : "Leaderboard could not be loaded."); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [scope]);
+
+  const podiumOrder = rows.length >= 3 ? [rows[1], rows[0], rows[2]] : rows;
   return (
     <section className="leaderboard-page">
-      <div className="leaderboard-hero"><div><span className="eyebrow">Official competition</span><h1>The Tactelo table.</h1><p>Ranked by points, then winning picks and average winning return.</p></div><div className="scope-toggle"><button className={scope === "overall" ? "active" : ""} onClick={() => setScope("overall")}>Overall</button><button className={scope === "gameweek" ? "active" : ""} onClick={() => setScope("gameweek")}>Gameweek 1</button></div></div>
-      <div className="podium">
-        {[leaderboardRows[1], leaderboardRows[0], leaderboardRows[2]].map((row, index) => { const place = [2, 1, 3][index]; return <article className={`podium-card place-${place}`} key={row.name}><span className="place">{place}</span><div className="podium-avatar">{row.name.split(" ").map((part) => part[0]).join("")}</div><h2>{row.name}</h2><strong>{(scope === "overall" ? row.points : row.points / 3.1).toFixed(2)}</strong><small>points</small></article>; })}
-      </div>
-      <div className="table-card">
-        <div className="table-head"><span>Pos</span><span>Player</span><span>Winning picks</span><span>Avg return</span><span>Points</span></div>
-        {leaderboardRows.map((row, index) => <div className="table-row" key={row.name}><span className="position">{index + 1}</span><div className="player-cell"><span className="small-avatar">{row.name[0]}</span><strong>{row.name}</strong><small className={row.trend > 0 ? "up" : row.trend < 0 ? "down" : ""}>{row.trend > 0 ? `↑ ${row.trend}` : row.trend < 0 ? `↓ ${Math.abs(row.trend)}` : "–"}</small></div><span>{scope === "overall" ? row.winners : Math.max(1, Math.round(row.winners / 3))}</span><span>{row.average.toFixed(2)}</span><strong>{(scope === "overall" ? row.points : row.points / 3.1).toFixed(2)}</strong></div>)}
-      </div>
+      <div className="leaderboard-hero"><div><span className="eyebrow">Official competition</span><h1>The Tactelo table.</h1><p>Ranked by points, then winning picks and average winning return.</p></div><div className="scope-toggle"><button className={scope === "overall" ? "active" : ""} onClick={() => setScope("overall")}>Overall</button><button className={scope === "gameweek" ? "active" : ""} onClick={() => setScope("gameweek")}>Current gameweek</button></div></div>
+      {loading && <div className="alert"><span>◌</span><div><strong>Loading leaderboard</strong><p>Retrieving the latest settled scores.</p></div></div>}
+      {loadError && <div className="alert warning"><span>!</span><div><strong>Leaderboard unavailable</strong><p>{loadError}</p></div></div>}
+      {!loading && !loadError && rows.length === 0 && <div className="alert"><span>i</span><div><strong>No settled scores yet</strong><p>The leaderboard will appear after the first gameweek is settled.</p></div></div>}
+      {rows.length > 0 && <>
+        <div className="podium">
+          {podiumOrder.map((row, index) => {
+            const place = rows.indexOf(row) + 1;
+            return <article className={`podium-card place-${place}`} key={row.name}><span className="place">{place}</span><div className="podium-avatar">{row.name.split(" ").map((part) => part[0]).join("")}</div><h2>{row.name}</h2><strong>{Number(row.points).toFixed(2)}</strong><small>points</small></article>;
+          })}
+        </div>
+        <div className="table-card">
+          <div className="table-head"><span>Pos</span><span>Player</span><span>Winning picks</span><span>Avg return</span><span>Points</span></div>
+          {rows.map((row, index) => <div className="table-row" key={row.name}><span className="position">{index + 1}</span><div className="player-cell"><span className="small-avatar">{row.name[0]}</span><strong>{row.name}</strong></div><span>{row.winners}</span><span>{Number(row.average).toFixed(2)}</span><strong>{Number(row.points).toFixed(2)}</strong></div>)}
+        </div>
+      </>}
       <p className="tiebreak-note"><span>i</span> Ties are separated by winning individual picks, then average winning return. Combo wins add points but do not count as individual wins.</p>
     </section>
   );

@@ -497,6 +497,31 @@ function AdminView({ feed, onFeed, toast, onLogout }: { feed: FixtureFeed; onFee
       setBusy(false);
     }
   };
+  const reverseSettlement = async () => {
+    const confirmation = window.prompt(
+      `Reverse settlement for ${feed.gameweekLabel}? Entries and results will be kept. Type REVERSE to confirm.`,
+    );
+    if (confirmation !== "REVERSE") {
+      if (confirmation !== null) toast("Settlement reversal cancelled. Type REVERSE exactly to confirm.", "warning");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const response = await fetch("/api/admin/reverse-settlement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ snapshotId: feed.snapshotId, confirmation }),
+      });
+      const payload = await response.json() as { submissions?: number; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Settlement reversal failed");
+      toast(`Settlement reversed. ${payload.submissions ?? 0} entries are ready to be settled again.`);
+    } catch (reason) {
+      toast(reason instanceof Error ? reason.message : "Settlement reversal failed", "warning");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <section className="admin-page">
       <div className="admin-title"><div><span className="eyebrow">Operations</span><h1>Game control.</h1><p>Import health, active snapshot and settlement controls for the POC.</p></div><div className="admin-title-actions"><button className="secondary-button" onClick={onLogout}>Sign out</button><button className="primary-button" onClick={importNow} disabled={busy}>{busy ? "Checking feeds…" : "Run import now"}<span>↻</span></button></div></div>
@@ -515,7 +540,7 @@ function AdminView({ feed, onFeed, toast, onLogout }: { feed: FixtureFeed; onFee
           ["Leaderboard recalculated", "System · 20 Jul, 18:22"],
         ].map(([action, detail]) => <div className="audit-row" key={action}><span /><div><strong>{action}</strong><small>{detail}</small></div></div>)}</article>
       </div>
-      <article className="admin-panel results-panel"><div className="panel-heading"><div><span className="eyebrow">Manual fallback</span><h2>Enter final scores</h2><p>Scores settle Match Result and Under/Over 2.5 automatically.</p></div><button className="secondary-button" onClick={() => toast("Result feed checked; no final results are available yet.")}>Import results CSV</button></div><div className="results-list">{feed.fixtures.map((fixture) => <div className="result-row" key={fixture.id}><time>{fixture.date.slice(5).split("-").reverse().join("/")}</time><strong>{fixture.homeTeam}</strong><input inputMode="numeric" aria-label={`${fixture.homeTeam} goals`} value={scores[fixture.id]?.[0] ?? ""} onChange={(event) => setScores({ ...scores, [fixture.id]: [event.target.value.replace(/\D/g, "").slice(0, 2), scores[fixture.id]?.[1] ?? ""] })} /><span>–</span><input inputMode="numeric" aria-label={`${fixture.awayTeam} goals`} value={scores[fixture.id]?.[1] ?? ""} onChange={(event) => setScores({ ...scores, [fixture.id]: [scores[fixture.id]?.[0] ?? "", event.target.value.replace(/\D/g, "").slice(0, 2)] })} /><strong>{fixture.awayTeam}</strong><button className="void-button" onClick={() => toast(`${fixture.homeTeam} v ${fixture.awayTeam} marked for void review.`)}>Void</button></div>)}</div><div className="settle-bar"><div><strong>{Object.values(scores).filter(([home, away]) => home !== "" && away !== "").length} scores ready</strong><small>Settlement changes are written to the audit log and can be recalculated.</small></div><button className="primary-button" onClick={() => toast("Gameweek settlement preview calculated.")}>Review & settle <span>→</span></button></div></article>
+      <article className="admin-panel results-panel"><div className="panel-heading"><div><span className="eyebrow">Manual fallback</span><h2>Enter final scores</h2><p>Scores settle Match Result and Under/Over 2.5 automatically.</p></div><button className="secondary-button" onClick={() => toast("Result feed checked; no final results are available yet.")}>Import results CSV</button></div><div className="results-list">{feed.fixtures.map((fixture) => <div className="result-row" key={fixture.id}><time>{fixture.date.slice(5).split("-").reverse().join("/")}</time><strong>{fixture.homeTeam}</strong><input inputMode="numeric" aria-label={`${fixture.homeTeam} goals`} value={scores[fixture.id]?.[0] ?? ""} onChange={(event) => setScores({ ...scores, [fixture.id]: [event.target.value.replace(/\D/g, "").slice(0, 2), scores[fixture.id]?.[1] ?? ""] })} /><span>–</span><input inputMode="numeric" aria-label={`${fixture.awayTeam} goals`} value={scores[fixture.id]?.[1] ?? ""} onChange={(event) => setScores({ ...scores, [fixture.id]: [scores[fixture.id]?.[0] ?? "", event.target.value.replace(/\D/g, "").slice(0, 2)] })} /><strong>{fixture.awayTeam}</strong><button className="void-button" onClick={() => toast(`${fixture.homeTeam} v ${fixture.awayTeam} marked for void review.`)}>Void</button></div>)}</div><div className="settle-bar"><div><strong>{Object.values(scores).filter(([home, away]) => home !== "" && away !== "").length} scores ready</strong><small>Settlement changes are written to the audit log and can be recalculated.</small></div><div className="settlement-actions"><button className="secondary-button danger-button" onClick={reverseSettlement} disabled={busy}>Reverse settlement</button><button className="primary-button" onClick={() => toast("Gameweek settlement preview calculated.")} disabled={busy}>Review & settle <span>→</span></button></div></div></article>
     </section>
   );
 }

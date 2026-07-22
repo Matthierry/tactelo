@@ -53,6 +53,9 @@ button:disabled { cursor: not-allowed; }
 .desktop-nav button:hover, .admin-link:hover { color: var(--text-primary); background: var(--bg-hover); }
 .desktop-nav button.active { color: var(--text-primary); background: var(--bg-elevated); box-shadow: inset 0 -2px 0 var(--brand-primary); }
 .account-area { display: flex; align-items: center; gap: 12px; }
+.account-button { min-height: 38px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 10px; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 13px; font-weight: 700; }
+.account-button:hover { border-color: var(--brand-primary); color: var(--text-primary); background: var(--brand-tint); }
+.login-button { border-color: var(--brand-primary); color: var(--brand-highlight); }
 .avatar { width: 38px; height: 38px; border: 1px solid var(--border-strong); border-radius: 50%; display: grid; place-items: center; color: var(--text-muted); background: var(--bg-elevated); font-weight: 750; }
 .avatar.signed-in { color: #111; background: linear-gradient(135deg, var(--brand-highlight), var(--brand-primary)); border-color: var(--brand-highlight); }
 
@@ -391,6 +394,8 @@ button:disabled { cursor: not-allowed; }
   .brand { width: 137px; transform: scale(.82); transform-origin: left center; }
   .desktop-nav, .admin-link { display: none; }
   .avatar { width: 34px; height: 34px; }
+  .account-area { gap: 7px; }
+  .account-button { min-height: 34px; padding: 0 10px; font-size: 11px; }
   .main-content { padding: 34px 14px 105px; }
   .page-intro, .credits-header, .leaderboard-hero, .admin-title { display: block; margin-bottom: 27px; }
   .page-intro h1, .credits-header h1, .leaderboard-hero h1, .admin-title h1 { font-size: 38px; margin-top: 9px; }

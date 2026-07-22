@@ -32,6 +32,31 @@ function cookie(token: string, maxAge: number, secure: boolean) {
   return `tactelo_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
 }
 
+function sessionToken(request: Request) {
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  return cookieHeader.split(";").map((part) => part.trim()).find((part) => part.startsWith("tactelo_session="))?.slice("tactelo_session=".length) ?? "";
+}
+
+export async function GET(request: Request) {
+  const token = sessionToken(request);
+  if (!token) return Response.json({ authenticated: false }, { headers: { "Cache-Control": "no-store" } });
+
+  const env = getRuntimeEnv();
+  if (!env.DB) {
+    const email = token.startsWith("demo-") ? decodeURIComponent(token.slice(5)) : "";
+    return Response.json(email ? { authenticated: true, email } : { authenticated: false }, { headers: { "Cache-Control": "no-store" } });
+  }
+
+  try {
+    const session = await env.DB.prepare(
+      "SELECT users.email AS email FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token = ? AND sessions.expires_at > ? LIMIT 1",
+    ).bind(token, new Date().toISOString()).first<{ email: string }>();
+    return Response.json(session ? { authenticated: true, email: session.email } : { authenticated: false }, { headers: { "Cache-Control": "no-store" } });
+  } catch {
+    return Response.json({ authenticated: false }, { headers: { "Cache-Control": "no-store" } });
+  }
+}
+
 export async function POST(request: Request) {
   let payload: AuthPayload;
   try { payload = await request.json() as AuthPayload; } catch { return Response.json({ error: "Invalid account request" }, { status: 400 }); }
@@ -99,5 +124,10 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const token = sessionToken(request);
+  const env = getRuntimeEnv();
+  if (token && env.DB) {
+    try { await env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run(); } catch { /* Cookie removal still signs this browser out safely. */ }
+  }
   return Response.json({ ok: true }, { headers: { "Set-Cookie": cookie("", 0, new URL(request.url).protocol === "https:") } });
 }

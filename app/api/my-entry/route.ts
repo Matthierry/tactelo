@@ -15,10 +15,11 @@ export async function GET(request: Request) {
   if (!env.DB) return Response.json({ error: "Entry storage is not configured." }, { status: 503 });
 
   const receiptId = new URL(request.url).searchParams.get("receiptId")?.trim() ?? "";
+  const snapshotId = new URL(request.url).searchParams.get("snapshotId")?.trim() ?? "";
   if (!receiptId) return Response.json({ error: "A receipt is required." }, { status: 400 });
 
   try {
-    const submission = await env.DB.prepare(
+    let submission = await env.DB.prepare(
       `SELECT submissions.id, submissions.status
        FROM submissions
        JOIN sessions ON sessions.user_id = submissions.user_id
@@ -26,16 +27,33 @@ export async function GET(request: Request) {
        LIMIT 1`,
     ).bind(receiptId, token, new Date().toISOString()).first<{ id: string; status: string }>();
 
+    // A repeated submission for the same gameweek can leave an old browser receipt
+    // after D1 preserves the user's original entry via the user/snapshot unique key.
+    // Resolve that stored entry through the authenticated session and snapshot only.
+    if (!submission && snapshotId) {
+      submission = await env.DB.prepare(
+        `SELECT submissions.id, submissions.status
+         FROM submissions
+         JOIN sessions ON sessions.user_id = submissions.user_id
+         WHERE submissions.snapshot_id = ? AND sessions.token = ? AND sessions.expires_at > ?
+         ORDER BY submissions.submitted_at DESC
+         LIMIT 1`,
+      ).bind(snapshotId, token, new Date().toISOString()).first<{ id: string; status: string }>();
+    }
+
     if (!submission) return Response.json({ error: "Entry not found." }, { status: 404 });
+
+    const storedReceiptId = submission.id;
 
     const selections = await env.DB.prepare(
       "SELECT fixture_id AS fixtureId, result, points FROM submission_selections WHERE submission_id = ? ORDER BY id",
-    ).bind(receiptId).all<{ fixtureId: string; result: "pending" | "won" | "lost" | "void"; points: number }>();
+    ).bind(storedReceiptId).all<{ fixtureId: string; result: "pending" | "won" | "lost" | "void"; points: number }>();
     const combo = await env.DB.prepare(
       "SELECT result, points, settled_combo_price AS settledPrice FROM submission_combo WHERE submission_id = ? LIMIT 1",
-    ).bind(receiptId).first<{ result: "pending" | "won" | "lost" | "void"; points: number; settledPrice: number | null }>();
+    ).bind(storedReceiptId).first<{ result: "pending" | "won" | "lost" | "void"; points: number; settledPrice: number | null }>();
 
     return Response.json({
+      receiptId: storedReceiptId,
       status: submission.status,
       selections: selections.results,
       combo: combo ?? null,

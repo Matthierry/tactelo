@@ -52,9 +52,11 @@ async function persist(receipt: SubmissionReceipt) {
   if (!env.DB) return;
   const db = env.DB;
   const now = receipt.submittedAt;
+  let stage = "lookup-user";
   try {
     const existingUser = await db.prepare("SELECT id FROM users WHERE email = ? LIMIT 1").bind(receipt.email).first<{ id: string }>();
     const userId = existingUser?.id ?? `user-${crypto.randomUUID()}`;
+    stage = "prepare-submission-write";
     const statements = [
       ...(!existingUser ? [db.prepare("INSERT INTO users (id, email, display_name, password_hash, password_salt, created_at) VALUES (?, ?, ?, '', '', ?)").bind(userId, receipt.email, receipt.email.split("@")[0], now)] : []),
       db.prepare("INSERT INTO submissions (id, user_id, snapshot_id, submitted_at, status) VALUES (?, ?, ?, ?, 'submitted')").bind(receipt.id, userId, receipt.snapshotId, now),
@@ -62,13 +64,20 @@ async function persist(receipt: SubmissionReceipt) {
       db.prepare("INSERT INTO submission_combo (submission_id, credits, original_combo_price, result, points) VALUES (?, ?, ?, 'pending', 0)").bind(receipt.id, receipt.comboCredit, receipt.comboPrice),
       db.prepare("INSERT INTO audit_log (actor, action, entity, after, timestamp) VALUES (?, 'submission_created', ?, ?, ?)").bind(receipt.email, receipt.id, JSON.stringify(receipt), now),
     ];
+    stage = "write-submission-batch";
     await db.batch(statements);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Database write failed";
-    if (message.includes("UNIQUE constraint failed")) return;
+    const errorName = error instanceof Error ? error.name : "UnknownError";
+    const errorMessage = error instanceof Error ? error.message : "Database write failed";
+    if (errorMessage.includes("UNIQUE constraint failed")) return;
     // Local agent preview uses a disposable D1 binding before migrations run.
     // Production deployments apply the checked-in migration before serving writes.
-    if (message.includes("no such table")) return;
+    if (errorMessage.includes("no such table")) return;
+    console.error("Entry persistence failed", {
+      stage,
+      errorName,
+      errorMessage,
+    });
     throw error;
   }
 }

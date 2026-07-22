@@ -476,10 +476,27 @@ function AdminLogin({ onSuccess, onCancel }: { onSuccess: () => void; onCancel: 
   );
 }
 
-function AdminView({ feed, toast, onLogout }: { feed: FixtureFeed; toast: (message: string) => void; onLogout: () => void }) {
+function AdminView({ feed, onFeed, toast, onLogout }: { feed: FixtureFeed; onFeed: (feed: FixtureFeed) => void; toast: (message: string, tone?: "success" | "warning") => void; onLogout: () => void }) {
   const [scores, setScores] = useState<Record<string, [string, string]>>({});
   const [busy, setBusy] = useState(false);
-  const importNow = () => { setBusy(true); window.setTimeout(() => { setBusy(false); toast("Fixture and team-colour feeds checked successfully."); }, 900); };
+  const importNow = async () => {
+    setBusy(true);
+    try {
+      const importResponse = await fetch("/api/admin/import?confirm=true", { method: "POST" });
+      const importPayload = await importResponse.json() as { fixtures?: number; error?: string };
+      if (!importResponse.ok) throw new Error(importPayload.error ?? "Fixture import failed");
+
+      const feedResponse = await fetch(`/api/fixtures?refresh=${Date.now()}`, { cache: "no-store" });
+      if (!feedResponse.ok) throw new Error("Fixtures were imported but the active feed could not be refreshed");
+      const nextFeed = await feedResponse.json() as FixtureFeed;
+      onFeed(nextFeed);
+      toast(`${importPayload.fixtures ?? nextFeed.fixtures.length} fixtures imported and activated successfully.`);
+    } catch (reason) {
+      toast(reason instanceof Error ? reason.message : "Fixture import failed", "warning");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <section className="admin-page">
       <div className="admin-title"><div><span className="eyebrow">Operations</span><h1>Game control.</h1><p>Import health, active snapshot and settlement controls for the POC.</p></div><div className="admin-title-actions"><button className="secondary-button" onClick={onLogout}>Sign out</button><button className="primary-button" onClick={importNow} disabled={busy}>{busy ? "Checking feeds…" : "Run import now"}<span>↻</span></button></div></div>
@@ -647,7 +664,7 @@ export default function TacteloApp() {
         {view === "picks" && <PicksView receipt={receipt} onMakePicks={() => setView("selections")} />}
         {view === "leaderboard" && <LeaderboardView />}
         {view === "admin" && !adminAuthenticated && <AdminLogin onSuccess={() => setAdminAuthenticated(true)} onCancel={() => { window.history.replaceState(null, "", "/"); navigate("selections"); }} />}
-        {view === "admin" && adminAuthenticated && <AdminView feed={feed} toast={(message) => setToast({ tone: "success", message })} onLogout={logoutAdmin} />}
+        {view === "admin" && adminAuthenticated && <AdminView feed={feed} onFeed={setFeed} toast={(message, tone = "success") => setToast({ tone, message })} onLogout={logoutAdmin} />}
       </main>
       <footer className="site-footer"><div><Brand /><p>Three picks. Six credits. One tactical edge.</p></div><div><button onClick={() => navigate("selections")}>Game rules</button><button onClick={() => navigate("leaderboard")}>Leaderboard</button>{adminAuthenticated && <button onClick={() => navigate("admin")}>Admin</button>}</div><small>Free to play · Tactelo POC 2026</small></footer>
       <BottomNav view={view} onView={navigate} />

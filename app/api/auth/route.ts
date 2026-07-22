@@ -7,6 +7,8 @@ type AuthPayload = {
   displayName?: string;
 };
 
+const PBKDF2_ITERATIONS = 100_000;
+
 function hex(bytes: Uint8Array) {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -18,7 +20,11 @@ function fromHex(value: string) {
 async function passwordHash(password: string, salt: Uint8Array) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
   const saltBuffer = salt.buffer.slice(salt.byteOffset, salt.byteOffset + salt.byteLength) as ArrayBuffer;
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: saltBuffer, iterations: 120_000 }, key, 256);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: saltBuffer, iterations: PBKDF2_ITERATIONS },
+    key,
+    256,
+  );
   return hex(new Uint8Array(bits));
 }
 
@@ -45,6 +51,7 @@ export async function POST(request: Request) {
     return Response.json({ email, displayName }, { headers: { "Set-Cookie": cookie(demoToken, maxAge, secure) } });
   }
 
+  let stage = "lookup-user";
   try {
     const existing = await env.DB.prepare("SELECT id, email, display_name, password_hash, password_salt FROM users WHERE email = ? LIMIT 1")
       .bind(email).first<{ id: string; email: string; display_name: string; password_hash: string; password_salt: string }>();
@@ -53,17 +60,21 @@ export async function POST(request: Request) {
 
     if (mode === "register") {
       if (existing) return Response.json({ error: "An account already exists for this email. Log in instead." }, { status: 409 });
+      stage = "hash-password";
       const salt = crypto.getRandomValues(new Uint8Array(16));
       const hash = await passwordHash(password, salt);
       userId = `user-${crypto.randomUUID()}`;
+      stage = "create-user";
       await env.DB.prepare("INSERT INTO users (id, email, display_name, password_hash, password_salt, created_at) VALUES (?, ?, ?, ?, ?, ?)")
         .bind(userId, email, displayName, hash, hex(salt), new Date().toISOString()).run();
     } else {
       if (!existing) return Response.json({ error: "No account was found for this email. Create one to continue." }, { status: 401 });
+      stage = "verify-password";
       const hash = await passwordHash(password, fromHex(existing.password_salt));
       if (hash !== existing.password_hash) return Response.json({ error: "The email or password is incorrect." }, { status: 401 });
     }
 
+    stage = "create-session";
     const token = crypto.randomUUID();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + maxAge * 1000).toISOString();
@@ -71,11 +82,18 @@ export async function POST(request: Request) {
       .bind(token, userId, now.toISOString(), expiresAt).run();
     return Response.json({ email, displayName: resolvedName }, { headers: { "Set-Cookie": cookie(token, maxAge, secure) } });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Authentication failed";
-    if (message.includes("no such table")) {
+    const errorName = error instanceof Error ? error.name : "UnknownError";
+    const errorMessage = error instanceof Error ? error.message : "Authentication failed";
+    if (errorMessage.includes("no such table")) {
       const demoToken = `demo-${encodeURIComponent(email)}`;
       return Response.json({ email, displayName }, { headers: { "Set-Cookie": cookie(demoToken, maxAge, secure) } });
     }
+    console.error("Account authentication failed", {
+      stage,
+      mode,
+      errorName,
+      errorMessage,
+    });
     return Response.json({ error: "Authentication is temporarily unavailable." }, { status: 503 });
   }
 }

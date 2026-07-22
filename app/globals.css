@@ -334,6 +334,9 @@ button:disabled { cursor: not-allowed; }
 .settle-bar div { display: flex; flex-direction: column; gap: 3px; }
 .settle-bar strong { font-size: 10px; }
 .settle-bar small { color: var(--text-muted); font-size: 8px; }
+.settlement-actions { display: flex; flex-direction: row !important; align-items: center; gap: 8px !important; }
+.danger-button { border-color: rgba(240, 82, 82, .4) !important; color: #ffaaaa !important; }
+.danger-button:hover { border-color: var(--negative) !important; background: rgba(240, 82, 82, .08) !important; }
 
 .toast { position: fixed; z-index: 150; right: 24px; bottom: 24px; max-width: 390px; min-height: 54px; display: grid; grid-template-columns: 27px 1fr 22px; align-items: center; gap: 10px; padding: 10px 11px; border: 1px solid; border-radius: 13px; background: var(--bg-elevated); box-shadow: var(--shadow); font-size: 11px; }
 .toast.success { border-color: rgba(34, 201, 122, .4); }
@@ -432,6 +435,8 @@ button:disabled { cursor: not-allowed; }
   .results-list { overflow-x: auto; }
   .result-row { min-width: 600px; }
   .settle-bar { flex-direction: column; align-items: stretch; }
+  .settlement-actions { align-items: stretch; }
+  .settlement-actions button { flex: 1; }
   .site-footer { display: none; }
   .bottom-nav { position: fixed; z-index: 60; left: 0; right: 0; bottom: 0; height: 66px; display: grid; grid-template-columns: repeat(3, 1fr); background: rgba(13, 19, 26, .96); border-top: 1px solid var(--border-strong); backdrop-filter: blur(16px); padding-bottom: env(safe-area-inset-bottom); }
   .bottom-nav button { position: relative; border: 0; background: transparent; color: var(--text-muted); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; cursor: pointer; font-size: 9px; font-weight: 700; }

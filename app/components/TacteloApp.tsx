@@ -424,7 +424,7 @@ function PicksView({ receipt, onMakePicks }: { receipt: SubmissionReceipt | null
   useEffect(() => {
     if (!receipt) return;
     let cancelled = false;
-    fetch(`/api/my-entry?receiptId=${encodeURIComponent(receipt.id)}&refresh=${Date.now()}`, { cache: "no-store" })
+    fetch(`/api/my-entry?receiptId=${encodeURIComponent(receipt.id)}&snapshotId=${encodeURIComponent(receipt.snapshotId)}&refresh=${Date.now()}`, { cache: "no-store" })
       .then(async (response) => {
         const payload = await response.json() as LiveEntry & { error?: string };
         if (!response.ok) throw new Error(payload.error ?? "Your results could not be loaded.");

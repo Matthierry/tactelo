@@ -76,7 +76,7 @@ function Brand() {
   );
 }
 
-function TopNav({ view, onView, user, admin }: { view: View; onView: (view: View) => void; user: string | null; admin: boolean }) {
+function TopNav({ view, onView, user, admin, onLogin, onLogout }: { view: View; onView: (view: View) => void; user: string | null; admin: boolean; onLogin: () => void; onLogout: () => void }) {
   const items: Array<[View, string, string]> = [
     ["selections", "Make picks", "◎"],
     ["picks", "My picks", "▣"],
@@ -95,7 +95,9 @@ function TopNav({ view, onView, user, admin }: { view: View; onView: (view: View
         </nav>
         <div className="account-area">
           {admin && <button className="admin-link" onClick={() => onView("admin")}>Admin</button>}
-          <span className={user ? "avatar signed-in" : "avatar"}>{user ? user.slice(0, 1).toUpperCase() : "?"}</span>
+          {user ? (
+            <><span className="avatar signed-in" title={user}>{user.slice(0, 1).toUpperCase()}</span><button className="account-button" onClick={onLogout}>Log out</button></>
+          ) : <button className="account-button login-button" onClick={onLogin}>Log in</button>}
         </div>
       </div>
     </header>
@@ -357,7 +359,7 @@ function CreditsView({ picks, onBack, onSubmit }: { picks: Pick[]; onBack: () =>
   );
 }
 
-function LoginModal({ onClose, onComplete }: { onClose: () => void; onComplete: (details: { email: string; password: string; displayName: string; mode: "login" | "register" }) => Promise<void> }) {
+function LoginModal({ onClose, onComplete, submitEntry }: { onClose: () => void; onComplete: (details: { email: string; password: string; displayName: string; mode: "login" | "register" }) => Promise<void>; submitEntry: boolean }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -385,16 +387,16 @@ function LoginModal({ onClose, onComplete }: { onClose: () => void; onComplete: 
       <div className="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
         <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
         <div className="modal-brand"><div className="mini-mark">◎</div><span>Tactelo</span></div>
-        <span className="eyebrow">Your picks are safe</span>
-        <h2 id="login-title">{mode === "login" ? "Log in to submit." : "Create your free account."}</h2>
-        <p>We’ve kept your three picks and credit choices ready. Sign in now to add them to the competition.</p>
+        <span className="eyebrow">{submitEntry ? "Your picks are safe" : "Your Tactelo account"}</span>
+        <h2 id="login-title">{mode === "login" ? (submitEntry ? "Log in to submit." : "Welcome back.") : "Create your free account."}</h2>
+        <p>{submitEntry ? "We’ve kept your three picks and credit choices ready. Sign in now to add them to the competition." : "Log in to view your saved entry and continue playing on this device."}</p>
         <div className="auth-tabs"><button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Log in</button><button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Create account</button></div>
         <form onSubmit={submit}>
           {mode === "register" && <label>Display name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Matt C" autoComplete="name" /></label>}
           <label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label>
           <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 6 characters" autoComplete={mode === "login" ? "current-password" : "new-password"} /></label>
           {error && <div className="form-error">{error}</div>}
-          <button className="primary-button full" disabled={busy}>{busy ? "Saving your entry…" : mode === "login" ? "Log in & submit" : "Create account & submit"}<span>→</span></button>
+          <button className="primary-button full" disabled={busy}>{busy ? (submitEntry ? "Saving your entry…" : "Signing in…") : mode === "login" ? (submitEntry ? "Log in & submit" : "Log in") : (submitEntry ? "Create account & submit" : "Create account")}<span>→</span></button>
         </form>
         <small className="privacy-note">Free to play. No payment details, cash balances or marketing opt-in required.</small>
       </div>
@@ -691,9 +693,11 @@ export default function TacteloApp() {
   const [receipt, setReceipt] = useState<SubmissionReceipt | null>(null);
   const [user, setUser] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
+  const [loginForSubmission, setLoginForSubmission] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
   const [loaded, setLoaded] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
   const [adminAuthenticated, setAdminAuthenticated] = useState(false);
   const [adminChecked, setAdminChecked] = useState(false);
 
@@ -704,7 +708,6 @@ export default function TacteloApp() {
         const storedReceipt = JSON.parse(localStorage.getItem(RECEIPT_STORAGE) ?? "null") as SubmissionReceipt | null;
         setPicks(storedPicks);
         setReceipt(storedReceipt);
-        setUser(localStorage.getItem(USER_STORAGE));
       } catch {
         localStorage.removeItem(PICK_STORAGE);
       }
@@ -723,6 +726,16 @@ export default function TacteloApp() {
       .then((payload) => setAdminAuthenticated(Boolean(payload.authenticated)))
       .catch(() => setAdminAuthenticated(false))
       .finally(() => setAdminChecked(true));
+    fetch("/api/auth", { cache: "no-store" })
+      .then((response) => response.json() as Promise<{ authenticated?: boolean; email?: string }>)
+      .then((payload) => {
+        const email = payload.authenticated ? payload.email ?? null : null;
+        setUser(email);
+        if (email) localStorage.setItem(USER_STORAGE, email);
+        else localStorage.removeItem(USER_STORAGE);
+      })
+      .catch(() => { setUser(null); localStorage.removeItem(USER_STORAGE); })
+      .finally(() => setAuthChecked(true));
     if (window.location.pathname === "/admin" || window.location.hash === "#admin") window.setTimeout(() => setView("admin"), 0);
     track("page_loaded_make_selections");
   }, []);
@@ -758,6 +771,7 @@ export default function TacteloApp() {
     if (user) completeSubmission(user, { credits, combo });
     else {
       track("submit_clicked_unauthenticated");
+      setLoginForSubmission(true);
       setShowLogin(true);
     }
   };
@@ -797,7 +811,18 @@ export default function TacteloApp() {
     });
     const payload = await response.json() as { email?: string; error?: string };
     if (!response.ok || !payload.email) throw new Error(payload.error ?? "Authentication failed");
-    await completeSubmission(payload.email);
+    localStorage.setItem(USER_STORAGE, payload.email);
+    setUser(payload.email);
+    setShowLogin(false);
+    if (loginForSubmission) await completeSubmission(payload.email);
+    else setToast({ tone: "success", message: "You are now logged in." });
+  };
+
+  const logout = async () => {
+    await fetch("/api/auth", { method: "DELETE" });
+    localStorage.removeItem(USER_STORAGE);
+    setUser(null);
+    setToast({ tone: "success", message: "You have been logged out." });
   };
 
   useEffect(() => {
@@ -806,10 +831,10 @@ export default function TacteloApp() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  if (!storageReady || !loaded || !adminChecked) {
+  if (!storageReady || !loaded || !adminChecked || !authChecked) {
     return (
       <div className="app-shell">
-        <TopNav view="selections" onView={() => undefined} user={null} admin={false} />
+        <TopNav view="selections" onView={() => undefined} user={null} admin={false} onLogin={() => undefined} onLogout={() => undefined} />
         <main className="main-content loading-shell" aria-label="Loading fixtures">
           <div className="loading-kicker" /><div className="loading-title" /><div className="loading-copy" />
           <div className="loading-grid"><div /><div /></div>
@@ -820,7 +845,7 @@ export default function TacteloApp() {
 
   return (
     <div className="app-shell">
-      <TopNav view={view} onView={navigate} user={user} admin={adminAuthenticated} />
+      <TopNav view={view} onView={navigate} user={user} admin={adminAuthenticated} onLogin={() => { setLoginForSubmission(false); setShowLogin(true); }} onLogout={logout} />
       <main className="main-content">
         {view === "selections" && <MakeSelections feed={feed} picks={picks} onPicks={setPicks} onContinue={() => { setView("credits"); track("credit_allocation_page_viewed"); window.scrollTo({ top: 0 }); }} closed={closed} />}
         {view === "credits" && <CreditsView picks={picks} onBack={() => setView("selections")} onSubmit={requestSubmit} />}
@@ -831,7 +856,7 @@ export default function TacteloApp() {
       </main>
       <footer className="site-footer"><div><Brand /><p>Three picks. Six credits. One tactical edge.</p></div><div><button onClick={() => navigate("selections")}>Game rules</button><button onClick={() => navigate("leaderboard")}>Leaderboard</button>{adminAuthenticated && <button onClick={() => navigate("admin")}>Admin</button>}</div><small>Free to play · Tactelo POC 2026</small></footer>
       <BottomNav view={view} onView={navigate} />
-      {showLogin && <LoginModal onClose={() => setShowLogin(false)} onComplete={authenticateAndSubmit} />}
+      {showLogin && <LoginModal onClose={() => setShowLogin(false)} onComplete={authenticateAndSubmit} submitEntry={loginForSubmission} />}
       {toast && <div className={`toast ${toast.tone}`} role="status"><span>{toast.tone === "success" ? "✓" : "!"}</span>{toast.message}<button onClick={() => setToast(null)}>×</button></div>}
     </div>
   );
